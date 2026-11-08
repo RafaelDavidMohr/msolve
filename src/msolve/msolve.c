@@ -119,6 +119,40 @@ void mpz_upoly_clear(mpz_upoly_t pol) {
   free(pol->coeffs);
 }
 
+/* initializes poly as the zero polynomial in Fp[z_1, ..., z_r], with no
+ * terms allocated (den is set to 1 so that poly is a valid polynomial) */
+static inline void fp_mpoly_init(fp_mpoly_t poly) {
+  poly->length = 0;
+  poly->alloc = 0;
+  poly->coeffs = NULL;
+  poly->mons = NULL;
+}
+
+/* frees the memory used by poly, assuming that the alloc numerators
+ * coeffs[0], ..., coeffs[alloc-1] have been initialized */
+static inline void fp_mpoly_clear(fp_mpoly_t poly) {
+  free(poly->coeffs);
+  free(poly->mons);
+}
+
+/* initializes poly as an empty univariate polynomial with coefficients
+ * in Fp[z_1, ..., z_r]: no coefficients allocated and, as for
+ * mpz_upoly_t, length -1 (unset) */
+static inline void fp_mpoly_upoly_init(fp_mpoly_upoly_t poly) {
+  poly->length = -1;
+  poly->alloc = 0;
+  poly->coeffs = NULL;
+}
+
+/* frees the memory used by poly, assuming that the alloc coefficients
+ * coeffs[0], ..., coeffs[alloc-1] have been initialized */
+static inline void fp_mpoly_upoly_clear(fp_mpoly_upoly_t poly) {
+  for (deg_t i = 0; i < poly->alloc; i++) {
+    fp_mpoly_clear(poly->coeffs[i]);
+  }
+  free(poly->coeffs);
+}
+
 static inline void mpz_upoly_out_str(FILE *file, mpz_upoly_t pol) {
   fprintf(file, "[");
   if (pol->length > 0) {
@@ -158,6 +192,41 @@ void mpz_param_clear(mpz_param_t param) {
   free(param->cfs);
   param->nvars = 0;
   param->nsols = 0;
+}
+
+/* initializes param as an empty parametrization: no variables, no
+ * coordinates and no hash table. den is the zero polynomial since the
+ * polynomial 1 cannot be stored without a hash table. */
+static inline void fp_param_with_parameters_init(
+    fp_param_with_parameters_t param) {
+  param->nvars = 0;
+  param->nsols = 0;
+  param->dquot = 0;
+  param->dim = 0;
+  param->ht = NULL;
+  fp_mpoly_init(param->den);
+  fp_mpoly_upoly_init(param->elim);
+  fp_mpoly_upoly_init(param->denom);
+  param->coords = NULL;
+}
+
+/* frees the memory used by param, including its hash table: param owns
+ * param->ht. If coords is not NULL, its nvars - 1 coordinates are
+ * assumed to be initialized. */
+static inline void fp_param_with_parameters_clear(
+    mpz_param_with_parameters_t param) {
+  fp_mpoly_clear(param->den);
+  fp_mpoly_upoly_clear(param->elim);
+  fp_mpoly_upoly_clear(param->denom);
+  if (param->coords != NULL) {
+    for (nvars_t i = 0; i < param->nvars - 1; i++) {
+      fp_mpoly_upoly_clear(param->coords[i]);
+    }
+  }
+  free(param->coords);
+  if (param->ht != NULL) {
+    full_free_hash_table(&(param->ht));
+  }
 }
 
 static inline void mpz_param_out_str(FILE *file, const data_gens_ff_t *gens,
