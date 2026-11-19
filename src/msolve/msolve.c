@@ -5191,8 +5191,24 @@ restart:
     bcf   = malloc(sizeof(void *));
     b     = 0;
 
-    if(gens->field_char > INT32_MAX || is_gf2_ext(gens->field_char)
-            || gens->boolean){
+    if (param_block_len) {
+      fprintf(ERRSTREAM, "Warning: Called with nonzero amount of parameters, "
+                         "rat. parametrization will be computed and all other "
+                         "output options ignored.\n");
+      if (gens->field_char == 0) {
+        fprintf(
+            ERRSTREAM,
+            "Parametric systems available only in positive characteristic.\n");
+        free(bld);
+        free(blen);
+        free(bexp);
+        free(bcf);
+        return -1;
+      }
+      return -1;
+    }
+
+    if(gens->field_char > INT32_MAX || is_gf2_ext(gens->field_char) || gens->boolean){
         /* for field characteristics >= 2^31 only Groebner bases can be
          * computed, F4 works with 64 bit coefficients then. The same
          * holds for GF(16) and GF(256) given by the field characteristics
@@ -6063,7 +6079,7 @@ restart:
         }
         return 0;
     }
-    else{/* characteristic is 0 */
+    else{/* characteristic is 0*/
 #if 0
       if (elim_block_len > 0) { /* characteristic is 0 */
             /* timings */
@@ -6240,6 +6256,12 @@ restart:
       /* characteristic is 0 */
       /* characteristic is 0 and elim_block = 0 */
       if (saturate == 1) {       /* characteristic is 0 and elim_block = 0 */
+        if (param_block_len) {
+          fprintf(ERRSTREAM, "Warning: Only rational parametrizations "
+                             "available with parameters, ignoring.\n");
+          param_block_len = 0;
+        }
+
             /* timings */
             double ct0, ct1, rt0, rt1;
             ct0 = cputime();
@@ -6679,16 +6701,16 @@ restart:
         }
         }
 
-        free(bld);
-        free(blen);
-        free(bexp);
-        free(bcf);
-        free_lucky_primes(&init_primes);
+      free(bld);
+      free(blen);
+      free(bexp);
+      free(bcf);
+      free_lucky_primes(&init_primes);
 
-        /* get parametrization */
-        *paramp     = param;
+      /* get parametrization */
+      *paramp     = param;
 
-        return !(b==0);
+      return !(b==0);
     }
 }
 
