@@ -23,60 +23,85 @@
  * implementation by Weijia Wang in AlgebraicSolving.jl (src/interp/), see
  * <https://github.com/algebraic-solving/AlgebraicSolving.jl>. */
 
-#include "./ratfunc_interpolation.h"
+#include "./msolve_parametric.h"
 
 /* helpers for rational interpolants */
 
 static inline void rational_interpolant_init(rational_interpolant_t interp) {
 
-  interp->deg_denom = RATFUNC_DEGREE_UNKNOWN;
-  interp->deg_num = RATFUNC_DEGREE_UNKNOWN;
+  interp->degs_known = 0;
+
+  interp->num_num_terms = 0;
+  interp->den_num_terms = 0;
+  interp->degs_denom = NULL;
+  interp->degs_num = NULL;
   interp->denom = NULL;
   interp->num = NULL;
+
+  interp->num_num_vals = 0;
+  interp->den_num_vals = 0;
+  interp->num_vals = NULL;
+  interp->denom_vals = NULL;
+
   return;
 }
 
 static inline void rational_interpolant_clear(rational_interpolant_t interp,
 					      const nmod_mpoly_ctx_t ctx) {
 
-  if (interp->deg_denom == RATFUNC_DEGREE_UNKNOWN ||
-      interp->deg_num == RATFUNC_DEGREE_UNKNOWN) {
+  if (!interp->degs_known) {
     return;
   }
 
-  for (int i = 0; i < interp->deg_num + 1; i++) {
+  for (int i = 0; i < interp->num_num_terms; i++) {
     nmod_mpoly_clear(interp->num[i], ctx);
   }
-  for (int i = 0; i < interp->deg_denom; i++) {
+  for (int i = 0; i < interp->den_num_terms; i++) {
     nmod_mpoly_clear(interp->denom[i], ctx);
   }
   free(interp->num);
   free(interp->denom);
+  free(interp->degs_num);
+  free(interp->degs_denom);
+
+  for (int i = 0; i < interp->num_num_vals; i++) {
+    free(interp->num_vals[i]);
+  }
+  free(interp->num_vals);
+  for (int i = 0; i < interp->den_num_vals; i++) {
+    free(interp->denom_vals[i]);
+  }
+  free(interp->denom_vals);
+
   return;
 }
 
 static inline void
-rational_interpolant_declare_deg(rational_interpolant_t interp, deg_t deg_num,
-                                 deg_t deg_denom, const nmod_mpoly_ctx_t ctx) {
+rational_interpolant_declare_deg(rational_interpolant_t interp,
+				 len_t num_num_terms, deg_t *deg_num, 
+				 len_t den_num_terms, deg_t *deg_denom,
+				 const nmod_mpoly_ctx_t ctx) {
 
-  interp->deg_num = deg_num;
-  interp->deg_denom = deg_denom;
+  interp->num_num_terms = num_num_terms;
+  interp->den_num_terms = den_num_terms;
+  interp->degs_num = deg_num;
+  interp->degs_denom = deg_denom;
 
-  interp->num = malloc((deg_num + 1) * sizeof(nmod_mpoly_t));
+  interp->num = malloc(num_num_terms * sizeof(nmod_mpoly_t));
   if (interp->num == NULL) {
     fprintf(stderr, "Error when allocating for rational function.\n");
     exit(1);
   }
-  for (int i = 0; i < interp->deg_num + 1; i++) {
+  for (int i = 0; i < interp->num_num_terms; i++) {
     nmod_mpoly_init(interp->num[i], ctx);
   }
 
-  interp->denom = malloc(deg_denom * sizeof(nmod_mpoly_t));
+  interp->denom = malloc(den_num_terms * sizeof(nmod_mpoly_t));
   if (interp->denom == NULL) {
     fprintf(stderr, "Error when allocating for rational function.\n");
     exit(1);
   }
-  for (int i = 0; i < interp->deg_denom; i++) {
+  for (int i = 0; i < interp->den_num_terms; i++) {
     nmod_mpoly_init(interp->denom[i], ctx);
   }
   return;

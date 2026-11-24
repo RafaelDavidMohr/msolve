@@ -32,16 +32,26 @@
 #include "./msolve-data.h"
 #include "../neogb/data.h"
 
-#define RATFUNC_DEGREE_UNKNOWN -2
-
 typedef ulong CF_p; // for flint compatibility
 
-// numerator: sum over t^i * num[i], denominator: 1 + sum over t^i*denom[i], t a new variable
+// numerator: sum over t^i * num[i], denominator: 1 + sum over
+// t^i*denom[i], t a new variable, 1 in the denominator not stored
 typedef struct {
+
+  int8_t degs_known;
+
+  len_t num_num_terms;
+  len_t den_num_terms;
   nmod_mpoly_t *num;
   nmod_mpoly_t *denom;
-  deg_t deg_num;
-  deg_t deg_denom;
+  deg_t *degs_num;
+  deg_t *degs_denom;
+
+  len_t num_num_vals;
+  len_t den_num_vals;
+  CF_p **num_vals;
+  CF_p **denom_vals;
+  
 } rational_interpolant_struct;
 typedef rational_interpolant_struct rational_interpolant_t[1];
 
