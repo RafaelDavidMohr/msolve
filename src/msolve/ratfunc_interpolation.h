@@ -32,10 +32,21 @@
 #include "./msolve-data.h"
 #include "../neogb/data.h"
 
+#define DEGREE_UNKNOWN -1
+
 typedef ulong CF_p; // for flint compatibility
 
+typedef struct {
+  nmod_mpoly_t *num;
+  nmod_mpoly_t *denom;
+  deg_t deg_num;
+  deg_t deg_denom;
+} rational_interpolant_struct;
+typedef rational_interpolant_struct rational_interpolant_t[1];
+
 /* Multivariate interpolation on a tensor-product grid, by recursive Newton
- * interpolation (one variable at a time, the first grid variable outermost).
+ * interpolation (one variable at a time, the first grid variable
+ * outermost).
  *
  * Let p = ctx->mod.n and n_i = degrees[i] + 1. Computes the unique
  * polynomial f over Z/pZ such that
@@ -48,22 +59,23 @@ typedef ulong CF_p; // for flint compatibility
  *
  * vals         the n_0 * n_1 * ... * n_{nvars-1} values, reduced mod p, in
  *              row-major order (first variable varying slowest): the value
- *              at (grid[0][e_0], ..., grid[nvars-1][e_{nvars-1}]) sits where
- *              it would in a C array vals[n_0][n_1]...[n_{nvars-1}].
- * grid         grid[i] holds the n_i nodes of the i-th grid variable,
- *              reduced mod p and pairwise distinct (so n_i <= p).
- * degrees      degree bounds, degrees[i] >= 0.
- * nvars        number of grid variables, 1 <= nvars <= nmod_mpoly_ctx_nvars(ctx).
- * interpolant  output; must be initialized with ctx. Its previous content is
- *              overwritten.
- * ctx          context of interpolant; p must be prime.
+ *              at (grid[0][e_0], ..., grid[nvars-1][e_{nvars-1}]) sits
+ * where it would in a C array vals[n_0][n_1]...[n_{nvars-1}]. grid grid[i]
+ * holds the n_i nodes of the i-th grid variable, reduced mod p and pairwise
+ * distinct (so n_i <= p). degrees      degree bounds, degrees[i] >= 0.
+ * nvars        number of grid variables, 1 <= nvars <=
+ * nmod_mpoly_ctx_nvars(ctx). interpolant  output; must be initialized with
+ * ctx. Its previous content is overwritten. ctx          context of
+ * interpolant; p must be prime.
  *
  * vals, grid and degrees are not modified. The preconditions are not
  * checked: repeated nodes make FLINT abort ("Impossible inverse"), and
  * nodes or values that are not reduced mod p can give wrong results. */
-void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t *degrees,
-				int32_t nvars,
-				nmod_mpoly_t interpolant, const nmod_mpoly_ctx_t ctx);
+void
+compute_newton_interpolant(const CF_p *vals, CF_p *const *grid,
+			   const deg_t *degrees, int32_t nvars,
+			   nmod_mpoly_t interpolant,
+			   const nmod_mpoly_ctx_t ctx);
 
 /* Univariate rational function interpolation with a known degree bound:
  * polynomial interpolation followed by FLINT's half-gcd (Cauchy

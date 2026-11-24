@@ -25,6 +25,29 @@
 
 #include "./ratfunc_interpolation.h"
 
+static inline void rational_interpolant_init(rational_interpolant_t interp) {
+
+  interp->deg_denom = DEGREE_UNKNOWN;
+  interp->deg_num = DEGREE_UNKNOWN;
+  interp->denom = NULL;
+  interp->num = NULL;
+  return;
+}
+
+static inline void rational_interpolant_clear(rational_interpolant_t interp,
+					      nmod_mpoly_ctx_t ctx) {
+
+  for (int i = 0; i < interp->deg_num; i++) {
+    nmod_mpoly_clear(interp->num[i], ctx);
+  }
+  for (int i = 0; i < interp->deg_denom; i++) {
+    nmod_mpoly_clear(interp->denom[i], ctx);
+  }
+  free(interp->num);
+  free(interp->denom);
+  return;
+}
+
 void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t *degrees,
 				int32_t nvars,
                                 nmod_mpoly_t interpolant, const nmod_mpoly_ctx_t ctx) {
