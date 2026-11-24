@@ -65,8 +65,37 @@ void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t
 				int32_t nvars,
 				nmod_mpoly_t interpolant, const nmod_mpoly_ctx_t ctx);
 
+/* Univariate rational function interpolation with a known degree bound:
+ * polynomial interpolation followed by FLINT's half-gcd (Cauchy
+ * interpolation).
+ *
+ * Let p = chr and N = 2 * deg + 1. Suppose vals[i] = f(args[i]) for a
+ * rational function f = P / D over Z/pZ with deg P <= deg, deg D <= deg
+ * and D(0) != 0. Then this computes f in lowest terms, normalized so that
+ * the denominator has constant term 1: f = num / denom with denom(0) = 1,
+ * i.e. num = p and denom = 1 + q in the form p / (1 + q). If f = 0, the
+ * result is num = 0, denom = 1.
+ *
+ * args   the N nodes, reduced mod p and pairwise distinct (so N <= p).
+ * vals   the N values f(args[i]), reduced mod p. D must not vanish at the
+ *        nodes.
+ * deg    a bound on the degrees of both P and D, deg >= 0. It need not be
+ *        tight.
+ * num    output, the numerator.
+ * denom  output, the denominator, with denom(0) = 1.
+ * chr    the prime p.
+ *
+ * Initialization: num and denom must be two different polynomials, already
+ * initialized by the caller with modulus chr (e.g. nmod_poly_init(num,
+ * chr)); FLINT uses the modulus stored in them. Their previous content is
+ * overwritten, and the caller clears them afterwards. args and vals are
+ * not modified.
+ *
+ * The preconditions are not checked. If D(0) = 0, FLINT aborts
+ * ("Impossible inverse"). If the values do not come from such an f, the
+ * result is unspecified, and FLINT may also abort. */
 void compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals, const deg_t deg,
 					  nmod_poly_t num, nmod_poly_t denom,
-					  CF_p chr); // result p/(1+q) returned as num = p, denom = 1+q
+					  CF_p chr);
 
 #endif
