@@ -1,3 +1,28 @@
+/* This file is part of msolve.
+ *
+ * msolve is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * msolve is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with msolve.  If not, see <https://www.gnu.org/licenses/>
+ *
+ * Authors:
+ * Jérémy Berthomieu
+ * Christian Eder
+ * Rafael Mohr
+ * Mohab Safey El Din */
+
+/* This implementation is based on the rational function interpolation
+ * implementation by Weijia Wang in AlgebraicSolving.jl (src/interp/), see
+ * <https://github.com/algebraic-solving/AlgebraicSolving.jl>. */
+
 #include "./ratfunc_interpolation.h"
 
 void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t *degrees,
