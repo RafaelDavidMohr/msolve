@@ -32,10 +32,11 @@
 #include "./msolve-data.h"
 #include "../neogb/data.h"
 
-#define DEGREE_UNKNOWN -1
+#define RATFUNC_DEGREE_UNKNOWN -2
 
 typedef ulong CF_p; // for flint compatibility
 
+// numerator: sum over t^i * num[i], denominator: 1 + sum over t^i*denom[i], t a new variable
 typedef struct {
   nmod_mpoly_t *num;
   nmod_mpoly_t *denom;

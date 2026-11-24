@@ -25,19 +25,26 @@
 
 #include "./ratfunc_interpolation.h"
 
+/* helpers for rational interpolants */
+
 static inline void rational_interpolant_init(rational_interpolant_t interp) {
 
-  interp->deg_denom = DEGREE_UNKNOWN;
-  interp->deg_num = DEGREE_UNKNOWN;
+  interp->deg_denom = RATFUNC_DEGREE_UNKNOWN;
+  interp->deg_num = RATFUNC_DEGREE_UNKNOWN;
   interp->denom = NULL;
   interp->num = NULL;
   return;
 }
 
 static inline void rational_interpolant_clear(rational_interpolant_t interp,
-					      nmod_mpoly_ctx_t ctx) {
+					      const nmod_mpoly_ctx_t ctx) {
 
-  for (int i = 0; i < interp->deg_num; i++) {
+  if (interp->deg_denom == RATFUNC_DEGREE_UNKNOWN ||
+      interp->deg_num == RATFUNC_DEGREE_UNKNOWN) {
+    return;
+  }
+
+  for (int i = 0; i < interp->deg_num + 1; i++) {
     nmod_mpoly_clear(interp->num[i], ctx);
   }
   for (int i = 0; i < interp->deg_denom; i++) {
@@ -47,6 +54,35 @@ static inline void rational_interpolant_clear(rational_interpolant_t interp,
   free(interp->denom);
   return;
 }
+
+static inline void
+rational_interpolant_declare_deg(rational_interpolant_t interp, deg_t deg_num,
+                                 deg_t deg_denom, const nmod_mpoly_ctx_t ctx) {
+
+  interp->deg_num = deg_num;
+  interp->deg_denom = deg_denom;
+
+  interp->num = malloc((deg_num + 1) * sizeof(nmod_mpoly_t));
+  if (interp->num == NULL) {
+    fprintf(stderr, "Error when allocating for rational function.\n");
+    exit(1);
+  }
+  for (int i = 0; i < interp->deg_num + 1; i++) {
+    nmod_mpoly_init(interp->num[i], ctx);
+  }
+
+  interp->denom = malloc(deg_denom * sizeof(nmod_mpoly_t));
+  if (interp->denom == NULL) {
+    fprintf(stderr, "Error when allocating for rational function.\n");
+    exit(1);
+  }
+  for (int i = 0; i < interp->deg_denom; i++) {
+    nmod_mpoly_init(interp->denom[i], ctx);
+  }
+  return;
+}
+
+/* Main functions */
 
 void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t *degrees,
 				int32_t nvars,
@@ -153,3 +189,5 @@ void compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals,
 
   return;
 }
+
+
