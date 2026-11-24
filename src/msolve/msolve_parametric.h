@@ -23,8 +23,8 @@
  * implementation by Weijia Wang in AlgebraicSolving.jl (src/interp/), see
  * <https://github.com/algebraic-solving/AlgebraicSolving.jl>. */
 
-#ifndef MSOLVE_RATFUNC_INTERPOLATION_H
-#define MSOLVE_RATFUNC_INTERPOLATION_H
+#ifndef MSOLVE_PARAMETRIC_H
+#define MSOLVE_PARAMETRIC_H
 
 #include <flint/nmod.h>
 #include <flint/nmod_poly.h>
@@ -33,6 +33,38 @@
 #include "../neogb/data.h"
 
 typedef ulong CF_p; // for flint compatibility
+
+/* univariate polynomial in t whose coefficients are rational functions
+ * in Fp(z_1, ..., z_r), each with its own numerator and denominator (no
+ * common denominator): the coefficient of t^i is
+ * coeffs[2*i] / coeffs[2*i+1]. The numerators and denominators are
+ * polynomials in z_1, ..., z_r over an nmod_mpoly_ctx_t that is not
+ * stored here: the caller passes it to the functions that need it. */
+typedef struct{
+  deg_t length;         /* number of coefficients, -1 if unset */
+  deg_t alloc;          /* number of coefficients allocated */
+  nmod_mpoly_t *coeffs; /* 2 * alloc entries: the numerators at even
+                         * indices, the denominators at odd indices */
+} nmod_ratfunc_upoly_struct;
+typedef nmod_ratfunc_upoly_struct nmod_ratfunc_upoly_t[1];
+
+/* rational parametrization over Fp(z_1, ..., z_r), stored like
+ * mpz_param_t except that its coefficients are rational functions in
+ * z_1, ..., z_r, each with its own numerator and denominator (see
+ * nmod_ratfunc_upoly_t): the coefficient of t^j in elim is
+ * elim->coeffs[2*j] / elim->coeffs[2*j+1], and likewise for denom and
+ * the coords[i]. All these polynomials use the same nmod_mpoly_ctx_t in
+ * z_1, ..., z_r, which is not stored here. */
+typedef struct{
+  nvars_t nvars; /* number of variables */
+  deg_t nsols;   /* degree of elim */
+  len_t dquot;   /* dimension of the quotient ring */
+  deg_t dim;     /* dimension of the ideal */
+  nmod_ratfunc_upoly_t elim;
+  nmod_ratfunc_upoly_t denom;
+  nmod_ratfunc_upoly_t *coords; /* nvars - 1 coordinates */
+} fp_param_with_parameters_struct;
+typedef fp_param_with_parameters_struct fp_param_with_parameters_t[1];
 
 // numerator: sum over t^i * num[i], denominator: 1 + sum over
 // t^i*denom[i], t a new variable, 1 in the denominator not stored

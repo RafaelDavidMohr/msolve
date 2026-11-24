@@ -280,47 +280,6 @@ typedef rrec_data_struct_t rrec_data_t[1];
 
 
 
-/* polynomial in Fp[z_1, ..., z_r] stored with a common denominator:
- The monomials are indices in a hash table (ht_t from neogb), which
- is not stored here but in the structure using these polynomials.
- Use flint finite field types for now. */
-typedef struct{
-  len_t length;  /* number of terms */
-  len_t alloc;   /* number of terms allocated */
-  int32_t *coeffs; /* coefficients, for now directly as integers */
-  hm_t *mons;    /* monomials, as indices in a hash table? */
-} fp_mpoly_struct;
-typedef fp_mpoly_struct fp_mpoly_t[1];
-
-/* univariate polynomial in t whose coefficients are polynomials in
- * QQ[z_1, ..., z_r]: coeffs[i] is the coefficient of t^i */
-typedef struct{
-  deg_t length;
-  deg_t alloc;
-  fp_mpoly_t *coeffs;
-} fp_mpoly_upoly_struct;
-typedef fp_mpoly_upoly_struct fp_mpoly_upoly_t[1];
-
-/* rational parametrization over Fp(z_1, ..., z_r), stored like
- * mpz_param_t except that its coefficients are rational functions in
- * z_1, ..., z_r with the common denominator den: the coefficient of t^j
- * in elim is elim->coeffs[j] / den, and likewise for denom and the
- * coords[i]. */
-typedef struct{
-  nvars_t nvars; /* number of variables */
-  deg_t nsols;   /* degree of elim */
-  len_t dquot;   /* dimension of the quotient ring */
-  deg_t dim;     /* dimension of the ideal */
-  ht_t *ht;      /* hash table of the monomials in z_1, ..., z_r, the
-                  * monomials of all polynomials below refer to it */
-  fp_mpoly_t den; /* lcm of the denominators of all coefficients of
-                    * elim, denom and the coords[i] */
-  fp_mpoly_upoly_t elim;
-  fp_mpoly_upoly_t denom;
-  fp_mpoly_upoly_t *coords; /* nvars - 1 coordinates */
-} fp_param_with_parameters_struct;
-typedef fp_param_with_parameters_struct fp_param_with_parameters_t[1];
-
 
 typedef struct{
   uint32_t trace_idx;

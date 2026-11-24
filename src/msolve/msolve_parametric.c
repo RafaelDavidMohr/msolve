@@ -25,6 +25,56 @@
 
 #include "./msolve_parametric.h"
 
+/* helpers for parametrizations with parameters */
+
+/* initializes poly as an empty univariate polynomial with coefficients
+ * in Fp(z_1, ..., z_r): no coefficients allocated and, as for
+ * mpz_upoly_t, length -1 (unset) */
+static inline void nmod_ratfunc_upoly_init(nmod_ratfunc_upoly_t poly) {
+  poly->length = -1;
+  poly->alloc = 0;
+  poly->coeffs = NULL;
+}
+
+/* frees the memory used by poly, assuming that the 2 * alloc entries
+ * coeffs[0], ..., coeffs[2*alloc-1] (the numerators and denominators of
+ * the alloc coefficients) have been initialized with ctx */
+static inline void nmod_ratfunc_upoly_clear(nmod_ratfunc_upoly_t poly,
+                                            const nmod_mpoly_ctx_t ctx) {
+  for (deg_t i = 0; i < 2 * poly->alloc; i++) {
+    nmod_mpoly_clear(poly->coeffs[i], ctx);
+  }
+  free(poly->coeffs);
+}
+
+/* initializes param as an empty parametrization: no variables and no
+ * coordinates */
+static inline void fp_param_with_parameters_init(
+    fp_param_with_parameters_t param) {
+  param->nvars = 0;
+  param->nsols = 0;
+  param->dquot = 0;
+  param->dim = 0;
+  nmod_ratfunc_upoly_init(param->elim);
+  nmod_ratfunc_upoly_init(param->denom);
+  param->coords = NULL;
+}
+
+/* frees the memory used by param, whose polynomials have been
+ * initialized with ctx. If coords is not NULL, its nvars - 1 coordinates
+ * are assumed to be initialized. */
+static inline void fp_param_with_parameters_clear(
+    fp_param_with_parameters_t param, const nmod_mpoly_ctx_t ctx) {
+  nmod_ratfunc_upoly_clear(param->elim, ctx);
+  nmod_ratfunc_upoly_clear(param->denom, ctx);
+  if (param->coords != NULL) {
+    for (nvars_t i = 0; i < param->nvars - 1; i++) {
+      nmod_ratfunc_upoly_clear(param->coords[i], ctx);
+    }
+  }
+  free(param->coords);
+}
+
 /* helpers for rational interpolants */
 
 static inline void rational_interpolant_init(rational_interpolant_t interp) {
@@ -49,14 +99,10 @@ static inline void rational_interpolant_init(rational_interpolant_t interp) {
 static inline void rational_interpolant_clear(rational_interpolant_t interp,
 					      const nmod_mpoly_ctx_t ctx) {
 
-  if (!interp->degs_known) {
-    return;
-  }
-
-  for (int i = 0; i < interp->num_num_terms; i++) {
+  for (len_t i = 0; i < interp->num_num_terms; i++) {
     nmod_mpoly_clear(interp->num[i], ctx);
   }
-  for (int i = 0; i < interp->den_num_terms; i++) {
+  for (len_t i = 0; i < interp->den_num_terms; i++) {
     nmod_mpoly_clear(interp->denom[i], ctx);
   }
   free(interp->num);
@@ -64,11 +110,11 @@ static inline void rational_interpolant_clear(rational_interpolant_t interp,
   free(interp->degs_num);
   free(interp->degs_denom);
 
-  for (int i = 0; i < interp->num_num_vals; i++) {
+  for (len_t i = 0; i < interp->num_num_vals; i++) {
     free(interp->num_vals[i]);
   }
   free(interp->num_vals);
-  for (int i = 0; i < interp->den_num_vals; i++) {
+  for (len_t i = 0; i < interp->den_num_vals; i++) {
     free(interp->denom_vals[i]);
   }
   free(interp->denom_vals);
@@ -82,27 +128,55 @@ rational_interpolant_declare_deg(rational_interpolant_t interp,
 				 len_t den_num_terms, deg_t *deg_denom,
 				 const nmod_mpoly_ctx_t ctx) {
 
+  interp->degs_known = 1;
   interp->num_num_terms = num_num_terms;
   interp->den_num_terms = den_num_terms;
   interp->degs_num = deg_num;
   interp->degs_denom = deg_denom;
 
+  /* malloc(0) may return NULL, which is not an error */
   interp->num = malloc(num_num_terms * sizeof(nmod_mpoly_t));
-  if (interp->num == NULL) {
+  if (interp->num == NULL && num_num_terms > 0) {
     fprintf(stderr, "Error when allocating for rational function.\n");
     exit(1);
   }
-  for (int i = 0; i < interp->num_num_terms; i++) {
+  for (len_t i = 0; i < interp->num_num_terms; i++) {
     nmod_mpoly_init(interp->num[i], ctx);
   }
 
   interp->denom = malloc(den_num_terms * sizeof(nmod_mpoly_t));
-  if (interp->denom == NULL) {
+  if (interp->denom == NULL && den_num_terms > 0) {
     fprintf(stderr, "Error when allocating for rational function.\n");
     exit(1);
   }
-  for (int i = 0; i < interp->den_num_terms; i++) {
+  for (len_t i = 0; i < interp->den_num_terms; i++) {
     nmod_mpoly_init(interp->denom[i], ctx);
+  }
+  return;
+}
+
+/* Sets t = 1 in interp: num = num[0] + ... + num[num_num_terms - 1] and
+ * denom = 1 + denom[0] + ... + denom[den_num_terms - 1], so that
+ * num / denom is the interpolated rational function in the variables of
+ * ctx. Nothing is reduced or normalized beyond that. If no terms have
+ * been declared, the result is 0 / 1.
+ *
+ * num and denom must be two different polynomials, not stored in interp
+ * and already initialized with ctx. Their previous content is
+ * overwritten. interp is not modified. */
+static inline void
+rational_interpolant_get_ratfunc(const rational_interpolant_t interp,
+                                 nmod_mpoly_t num, nmod_mpoly_t denom,
+                                 const nmod_mpoly_ctx_t ctx) {
+
+  nmod_mpoly_zero(num, ctx);
+  for (len_t i = 0; i < interp->num_num_terms; i++) {
+    nmod_mpoly_add(num, num, interp->num[i], ctx);
+  }
+
+  nmod_mpoly_one(denom, ctx);
+  for (len_t i = 0; i < interp->den_num_terms; i++) {
+    nmod_mpoly_add(denom, denom, interp->denom[i], ctx);
   }
   return;
 }
