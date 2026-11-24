@@ -65,4 +65,8 @@ void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t
 				int32_t nvars,
 				nmod_mpoly_t interpolant, const nmod_mpoly_ctx_t ctx);
 
+void compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals, const deg_t deg,
+					  nmod_poly_t num, nmod_poly_t denom,
+					  CF_p chr); // result p/(1+q) returned as num = p, denom = 1+q
+
 #endif

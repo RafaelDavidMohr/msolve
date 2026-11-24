@@ -94,3 +94,39 @@ void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t
   return;
 }
 
+void compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals,
+                                          const deg_t deg,
+                                          nmod_poly_t num, nmod_poly_t denom,
+					  CF_p chr) {
+
+  ulong N = 2*deg + 1;
+
+  nmod_poly_t F, master;
+  nmod_poly_init(F, chr);
+  nmod_poly_init(master, chr);
+  nmod_poly_interpolate_nmod_vec(F, args, vals, N);
+  nmod_poly_product_roots_nmod_vec(master, args, N);
+
+  nmod_poly_t m12, m21, m22, A;
+  nmod_poly_init(m12, chr);
+  nmod_poly_init(m21, chr);
+  nmod_poly_init(m22, chr);
+  nmod_poly_init(A, chr);
+
+  slong sgn;
+  sgn = nmod_poly_hgcd(denom, m12, m21, m22, A, num, master, F);
+
+  ulong c = nmod_poly_get_coeff_ui(denom, 0);
+  ulong cinv = nmod_inv(c, F->mod);
+  nmod_poly_scalar_mul_nmod(denom, denom, cinv);
+  nmod_poly_scalar_mul_nmod(num, num, sgn > 0 ? cinv : nmod_neg(cinv, F->mod));
+
+  nmod_poly_clear(F);
+  nmod_poly_clear(master);
+  nmod_poly_clear(m12);
+  nmod_poly_clear(m21);
+  nmod_poly_clear(m22);
+  nmod_poly_clear(A);
+
+  return;
+}
