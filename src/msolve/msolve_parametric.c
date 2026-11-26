@@ -252,41 +252,95 @@ void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t
   return;
 }
 
-void compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals,
-                                          const deg_t deg,
-                                          nmod_poly_t num, nmod_poly_t denom,
-					  CF_p chr) {
+/* Univariate rational function interpolation */
 
-  ulong N = 2*deg + 1;
+void univariate_interp_data_init(univariate_interp_data_t data,
+                                 const CF_p *ts, slong len, nmod_t mod) {
 
-  nmod_poly_t F, master;
-  nmod_poly_init(F, chr);
-  nmod_poly_init(master, chr);
-  nmod_poly_interpolate_nmod_vec(F, args, vals, N);
-  nmod_poly_product_roots_nmod_vec(master, args, N);
+  data->len = len;
 
+  data->tree = _nmod_poly_tree_alloc(len);
+  _nmod_poly_tree_build(data->tree, ts, len, mod);
+
+  /* functions starting with _ do not allocate their output */
+  data->weights = _nmod_vec_init(len);
+  _nmod_poly_interpolation_weights(data->weights, data->tree, len, mod);
+
+  nmod_poly_init_mod(data->master, mod);
+  nmod_poly_product_roots_nmod_vec(data->master, ts, len);
+
+  return;
+}
+
+void univariate_interp_data_clear(univariate_interp_data_t data) {
+
+  _nmod_poly_tree_free(data->tree, data->len);
+  _nmod_vec_clear(data->weights);
+  nmod_poly_clear(data->master);
+  return;
+}
+
+int interpolate_univariate_ratfunc(const univariate_interp_data_t data,
+				   const CF_p *vals,
+				   nmod_poly_t num, nmod_poly_t denom) {
+
+  nmod_t mod = data->master->mod;
+  slong len = data->len;
+
+  /* interpolating polynomial, written directly into the coefficients of F */
+  nmod_poly_t F;
+  nmod_poly_init_mod(F, mod);
+  nmod_poly_fit_length(F, len);
+  _nmod_poly_interpolate_nmod_vec_fast_precomp(F->coeffs, vals, data->tree,
+                                               data->weights, len, mod);
+  _nmod_poly_set_length(F, len);
+  _nmod_poly_normalise(F); /* hgcd needs normalized input */
+
+  /* outputs of hgcd that we use: denom is m11, num is B;
+   * m12, m21, m22 and A are only workspace */
   nmod_poly_t m12, m21, m22, A;
-  nmod_poly_init(m12, chr);
-  nmod_poly_init(m21, chr);
-  nmod_poly_init(m22, chr);
-  nmod_poly_init(A, chr);
+  nmod_poly_init_mod(m12, mod);
+  nmod_poly_init_mod(m21, mod);
+  nmod_poly_init_mod(m22, mod);
+  nmod_poly_init_mod(A, mod);
 
   slong sgn;
-  sgn = nmod_poly_hgcd(denom, m12, m21, m22, A, num, master, F);
-
-  ulong c = nmod_poly_get_coeff_ui(denom, 0);
-  ulong cinv = nmod_inv(c, F->mod);
-  nmod_poly_scalar_mul_nmod(denom, denom, cinv);
-  nmod_poly_scalar_mul_nmod(num, num, sgn > 0 ? cinv : nmod_neg(cinv, F->mod));
+  sgn = nmod_poly_hgcd(denom, m12, m21, m22, A, num, data->master, F);
 
   nmod_poly_clear(F);
-  nmod_poly_clear(master);
   nmod_poly_clear(m12);
   nmod_poly_clear(m21);
   nmod_poly_clear(m22);
   nmod_poly_clear(A);
 
-  return;
+  /* f = sgn * num / denom; normalize so that denom(0) = 1 */
+  if (sgn < 0) {
+    nmod_poly_scalar_mul_nmod(num, num, nmod_neg(1, mod));
+  }
+  ulong c = nmod_poly_get_coeff_ui(denom, 0);
+  if (c == 0) {
+    return 1;
+  }
+  ulong cinv = nmod_inv(c, mod);
+  nmod_poly_scalar_mul_nmod(denom, denom, cinv);
+  nmod_poly_scalar_mul_nmod(num, num, cinv);
+  return 0;
+}
+
+int compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals,
+					 const deg_t deg,
+					 nmod_poly_t num, nmod_poly_t denom,
+					 CF_p chr) {
+
+  nmod_t mod;
+  nmod_init(&mod, chr);
+
+  univariate_interp_data_t data;
+  univariate_interp_data_init(data, args, 2 * (slong) deg + 1, mod);
+  int ret = interpolate_univariate_ratfunc(data, vals, num, denom);
+  univariate_interp_data_clear(data);
+
+  return ret;
 }
 
 

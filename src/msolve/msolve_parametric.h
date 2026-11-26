@@ -27,6 +27,7 @@
 #define MSOLVE_PARAMETRIC_H
 
 #include <flint/nmod.h>
+#include <flint/nmod_vec.h>
 #include <flint/nmod_poly.h>
 #include <flint/nmod_mpoly.h>
 #include "./msolve-data.h"
@@ -87,6 +88,25 @@ typedef struct {
 } rational_interpolant_struct;
 typedef rational_interpolant_struct rational_interpolant_t[1];
 
+/* precomputed data for univariate interpolation on fixed arguments
+ * t_0, ..., t_{len-1}, shared by all reconstructions on these arguments (e.g.
+ * all coefficients of a parametrization along one line). It is not
+ * modified after univariate_interp_data_init, so it can also be shared
+ * between threads.
+ *
+ * tree and weights are built with FLINT functions that are exported but
+ * not part of FLINT's documented API (_nmod_poly_tree_*,
+ * _nmod_poly_interpolation_weights,
+ * _nmod_poly_interpolate_nmod_vec_fast_precomp), so they may change
+ * between FLINT versions. Written against FLINT 3.6. */
+typedef struct {
+  slong len;          /* number of arguments */
+  nn_ptr *tree;       /* subproduct tree of the arguments */
+  nn_ptr weights;     /* interpolation weights, len entries */
+  nmod_poly_t master; /* prod (t - t_i); also holds the modulus */
+} univariate_interp_data_struct;
+typedef univariate_interp_data_struct univariate_interp_data_t[1];
+
 /* Multivariate interpolation on a tensor-product grid, by recursive Newton
  * interpolation (one variable at a time, the first grid variable
  * outermost).
@@ -103,41 +123,95 @@ typedef rational_interpolant_struct rational_interpolant_t[1];
  * vals         the n_0 * n_1 * ... * n_{nvars-1} values, reduced mod p, in
  *              row-major order (first variable varying slowest): the value
  *              at (grid[0][e_0], ..., grid[nvars-1][e_{nvars-1}]) sits
- * where it would in a C array vals[n_0][n_1]...[n_{nvars-1}]. grid grid[i]
- * holds the n_i nodes of the i-th grid variable, reduced mod p and pairwise
- * distinct (so n_i <= p). degrees      degree bounds, degrees[i] >= 0.
- * nvars        number of grid variables, 1 <= nvars <=
- * nmod_mpoly_ctx_nvars(ctx). interpolant  output; must be initialized with
- * ctx. Its previous content is overwritten. ctx          context of
- * interpolant; p must be prime.
+ *              where it would in a C array vals[n_0][n_1]...[n_{nvars-1}].
+ * grid         grid[i] holds the n_i arguments of the i-th grid variable,
+ *              reduced mod p and pairwise distinct (so n_i <= p).
+ * degrees      degree bounds, degrees[i] >= 0.
+ * nvars        number of grid variables,
+ *              1 <= nvars <= nmod_mpoly_ctx_nvars(ctx).
+ * interpolant  output; must be initialized with ctx. Its previous content
+ *              is overwritten.
+ * ctx          context of interpolant; p must be prime.
  *
  * vals, grid and degrees are not modified. The preconditions are not
- * checked: repeated nodes make FLINT abort ("Impossible inverse"), and
- * nodes or values that are not reduced mod p can give wrong results. */
+ * checked: repeated arguments make FLINT abort ("Impossible inverse"), and
+ * arguments or values that are not reduced mod p can give wrong results. */
 void
 compute_newton_interpolant(const CF_p *vals, CF_p *const *grid,
 			   const deg_t *degrees, int32_t nvars,
 			   nmod_mpoly_t interpolant,
 			   const nmod_mpoly_ctx_t ctx);
 
-/* Univariate rational function interpolation with a known degree bound:
- * polynomial interpolation followed by FLINT's half-gcd (Cauchy
- * interpolation).
+/* Initializes data for the len arguments ts[0], ..., ts[len-1] modulo the
+ * prime p = mod.n. The arguments must be reduced mod p and pairwise distinct,
+ * and len >= 1; for interpolate_univariate_ratfunc, len must be odd. The
+ * preconditions are not checked. ts is not modified and is no longer
+ * needed after the call. Free data with univariate_interp_data_clear. */
+void univariate_interp_data_init(univariate_interp_data_t data,
+                                 const CF_p *ts, slong len, nmod_t mod);
+
+/* Frees the memory used by data. */
+void univariate_interp_data_clear(univariate_interp_data_t data);
+
+/* Univariate rational function interpolation with a known degree bound,
+ * on precomputed arguments: polynomial interpolation followed by FLINT's
+ * half-gcd (Cauchy interpolation).
+ *
+ * Let p be the modulus of data, t_0, ..., t_{N-1} its arguments and
+ * N = data->len = 2 * deg + 1 (N must be odd). Suppose vals[i] = f(t_i)
+ * for a rational function f = P / D over Z/pZ with deg P <= deg and
+ * deg D <= deg. Then this computes f = num / denom in lowest terms.
+ *
+ * Returns 0 if D(0) != 0. Then num / denom is normalized so that the
+ * denominator has constant term 1: denom(0) = 1, i.e. num = p and
+ * denom = 1 + q in the form p / (1 + q). If f = 0, the result is num = 0,
+ * denom = 1.
+ *
+ * Returns 1 if D(0) = 0, so that f cannot be written as p / (1 + q). Then
+ * num / denom = f still holds, but num and denom are not normalized: they
+ * are only determined up to a common nonzero constant factor.
+ *
+ * data   precomputed data for the N arguments. It is not modified, so the
+ *        same data can be used for many calls (and by several threads).
+ * vals   the N values f(t_i), reduced mod p. D must not vanish at the
+ *        arguments.
+ * num    output, the numerator.
+ * denom  output, the denominator; denom(0) = 1 if 0 is returned.
+ *
+ * Initialization: num and denom must be two different polynomials, already
+ * initialized by the caller with modulus p. Their previous content is
+ * overwritten, and the caller clears them afterwards. vals is not
+ * modified.
+ *
+ * The preconditions are not checked. If the values do not come from such
+ * an f, the result is unspecified, and FLINT may abort. */
+int interpolate_univariate_ratfunc(const univariate_interp_data_t data,
+				   const CF_p *vals,
+				   nmod_poly_t num, nmod_poly_t denom);
+
+/* Univariate rational function interpolation with a known degree bound,
+ * without precomputation: builds the data for the arguments args, calls
+ * interpolate_univariate_ratfunc and frees the data again. When several
+ * reconstructions use the same arguments, call univariate_interp_data_init
+ * once and interpolate_univariate_ratfunc for each of them instead.
  *
  * Let p = chr and N = 2 * deg + 1. Suppose vals[i] = f(args[i]) for a
- * rational function f = P / D over Z/pZ with deg P <= deg, deg D <= deg
- * and D(0) != 0. Then this computes f in lowest terms, normalized so that
- * the denominator has constant term 1: f = num / denom with denom(0) = 1,
- * i.e. num = p and denom = 1 + q in the form p / (1 + q). If f = 0, the
- * result is num = 0, denom = 1.
+ * rational function f = P / D over Z/pZ with deg P <= deg and
+ * deg D <= deg. Then this computes f = num / denom in lowest terms. The
+ * return value and the normalization are as for
+ * interpolate_univariate_ratfunc:
+ *   - 0 if D(0) != 0: denom(0) = 1, i.e. num = p and denom = 1 + q in the
+ *     form p / (1 + q). If f = 0, the result is num = 0, denom = 1.
+ *   - 1 if D(0) = 0: num / denom = f, but num and denom are not
+ *     normalized (only determined up to a common nonzero constant).
  *
- * args   the N nodes, reduced mod p and pairwise distinct (so N <= p).
+ * args   the N arguments, reduced mod p and pairwise distinct (so N <= p).
  * vals   the N values f(args[i]), reduced mod p. D must not vanish at the
- *        nodes.
+ *        arguments.
  * deg    a bound on the degrees of both P and D, deg >= 0. It need not be
  *        tight.
  * num    output, the numerator.
- * denom  output, the denominator, with denom(0) = 1.
+ * denom  output, the denominator; denom(0) = 1 if 0 is returned.
  * chr    the prime p.
  *
  * Initialization: num and denom must be two different polynomials, already
@@ -146,11 +220,10 @@ compute_newton_interpolant(const CF_p *vals, CF_p *const *grid,
  * overwritten, and the caller clears them afterwards. args and vals are
  * not modified.
  *
- * The preconditions are not checked. If D(0) = 0, FLINT aborts
- * ("Impossible inverse"). If the values do not come from such an f, the
- * result is unspecified, and FLINT may also abort. */
-void compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals, const deg_t deg,
-					  nmod_poly_t num, nmod_poly_t denom,
-					  CF_p chr);
+ * The preconditions are not checked. If the values do not come from such
+ * an f, the result is unspecified, and FLINT may abort. */
+int compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals, const deg_t deg,
+					 nmod_poly_t num, nmod_poly_t denom,
+					 CF_p chr);
 
 #endif
