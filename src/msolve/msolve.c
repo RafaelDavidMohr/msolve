@@ -214,7 +214,7 @@ static inline void fp_param_with_parameters_init(
  * param->ht. If coords is not NULL, its nvars - 1 coordinates are
  * assumed to be initialized. */
 static inline void fp_param_with_parameters_clear(
-    mpz_param_with_parameters_t param) {
+    fp_param_with_parameters_t param) {
   fp_mpoly_clear(param->den);
   fp_mpoly_upoly_clear(param->elim);
   fp_mpoly_upoly_clear(param->denom);
@@ -5162,6 +5162,7 @@ int core_msolve(
   int32_t initial_hts,
   int32_t max_pairs,
   int32_t elim_block_len,
+  int32_t param_block_len,
   int32_t update_ht,
   int32_t generate_pbm,
   int32_t reduce_gb,
@@ -6951,7 +6952,7 @@ void msolve_julia(
 
     /* main msolve functionality */
     int ret = core_msolve(la_option, use_signatures, nr_threads, info_level,
-			  initial_hts, max_nr_pairs, elim_block_len, reset_ht,
+			  initial_hts, max_nr_pairs, elim_block_len, 0 /* param_block_len */, reset_ht,
                           0 /* generate pbm */, 1 /* reduce_gb */,
                           print_gb, 0 /*truncate_lifting*/, get_param,
 			  genericity_handling, 0 /* unstable_staircase -> change to 2?*/,

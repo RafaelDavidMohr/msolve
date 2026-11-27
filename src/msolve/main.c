@@ -209,6 +209,8 @@ static inline void display_help(char *str){
   display_option_help_noopt("basis and skip its computation. Only with -n\n");
   display_option_help_noopt("or -C over prime fields; the result is wrong if\n");
   display_option_help_noopt("the assumption does not hold.\n");
+  display_option_help('R', "parametric", "PART", "Treat the last PART variables of the input system\n");
+  display_option_help_noopt("as parameters, making them part of the base field.\n");
   display_option_help('l', "linear-algebra", "LIN", "Linear algebra variant to be applied:\n");
   display_option_help_noopt(" 1 - exact sparse / dense.\n");
   display_option_help_noopt(" 2 - exact sparse (default).\n");
@@ -282,6 +284,7 @@ static void getoptions(
         int32_t *nthreads,
         int32_t *max_pairs,
         int32_t *elim_block_len,
+	int32_t *param_block_len,
         int32_t *linear_algebra,
         int32_t *use_signatures,
         int32_t *update_ht,
@@ -317,7 +320,7 @@ static void getoptions(
   char *filename = NULL;
   char *out_fname = NULL;
   opterr = 1;
-  char short_options[] = "c:Cd:e:f:g:hil:L:m:M:n:N:o:p:P:q:r:s:St:u:v:V";
+  char short_options[] = "c:Cd:e:R:f:g:hil:L:m:M:n:N:o:p:P:q:r:s:St:u:v:V";
 
   /* For long options that have no equivalent short option, use a
      non-character as a pseudo short option, starting with CHAR_MAX + 1.
@@ -344,6 +347,7 @@ static void getoptions(
     {"boolean-zeros", no_argument, NULL, BOOLEAN_ZEROS_OPTION},
     {"elimination", required_argument, NULL, 'e'},
     {"elim-drl", required_argument, NULL, ELIM_DRL_OPTION},
+    {"parametric", required_argument, NULL, 'R'},
     {"file", required_argument, NULL, 'f'},
     {"groebner-basis", required_argument, NULL, 'g'},
     {"help", no_argument, NULL, 'h'},
@@ -410,6 +414,12 @@ static void getoptions(
       *elim_block_len = strtol(optarg, NULL, 10);
       if (*elim_block_len < 0) {
           *elim_block_len = 0;
+      }
+      break;
+    case 'R':
+      *param_block_len = strtol(optarg, NULL, 10);
+      if (*param_block_len < 0) {
+          *param_block_len = 0;
       }
       break;
     case 'u':
@@ -661,6 +671,7 @@ int main(int argc, char **argv){
     int32_t initial_hts           = 17;
     int32_t max_pairs             = 0;
     int32_t elim_block_len        = 0;
+    int32_t param_block_len       = 0;
     int32_t update_ht             = 0;
     int32_t generate_pbm          = 0;
     int32_t reduce_gb             = 1;
@@ -696,7 +707,7 @@ int main(int argc, char **argv){
     files->output_rtime = 0;
     files->output_ctime = 0;
     getoptions(argc, argv, &initial_hts, &nr_threads, &max_pairs,
-               &elim_block_len, &la_option, &use_signatures, &update_ht,
+               &elim_block_len, &param_block_len, &la_option, &use_signatures, &update_ht,
                &reduce_gb, &print_gb, &truncate_lifting, &genericity_handling,
                &unstable_staircase, &saturate, &colon,
                &normal_form, &normal_form_matrix, &is_gb, &lift_matrix, &get_param,
@@ -767,6 +778,11 @@ int main(int argc, char **argv){
       fprintf(ERRSTREAM, "available with option --boolean-zeros.\n");
       exit(1);
     }
+
+    if (param_block_len) {
+      fprintf(ERRSTREAM, "Work in process.\n");
+      exit(1);
+    }
 #ifdef IODEBUG
     display_gens(VERBSTREAM, gens);
 #endif
@@ -810,7 +826,7 @@ int main(int argc, char **argv){
 
     /* main msolve functionality */
     int ret = core_msolve(la_option, use_signatures, nr_threads, info_level,
-                          initial_hts, max_pairs, elim_block_len, update_ht,
+                          initial_hts, max_pairs, elim_block_len, param_block_len, update_ht,
                           generate_pbm, reduce_gb, print_gb, truncate_lifting,
                           get_param,
                           genericity_handling, unstable_staircase, saturate,

@@ -133,6 +133,7 @@ int core_msolve(
         int32_t initial_hts,
         int32_t max_pairs,
         int32_t elim_block_len,
+	int32_t param_block_len,
         int32_t update_ht,
         int32_t generate_pbm,
         int32_t reduce_gb,
