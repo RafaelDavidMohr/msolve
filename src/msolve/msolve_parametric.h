@@ -171,5 +171,42 @@ int ratfunc_search_add_point(ratfunc_search_t S, CF_p t, const CF_p *vals);
 int ratfunc_search_get(nmod_poly_t num, nmod_poly_t den,
                        const ratfunc_search_t S);
 
+/* Specialization points z = t * (y_1, ..., y_{r-1}, 1), r = nparams. The
+ * grid points (directions) (y_1, ..., y_{r-1}) form a tensor grid,
+ * enumerated in row-major order (first grid variable slowest, as in
+ * compute_newton_interpolant). All grid points share the scaling factors:
+ * the k-th point on each of them uses t = ts[k]. */
+typedef struct {
+  nvars_t nparams;    /* r */
+  deg_t *grid_deg;    /* r - 1 degree bounds (last parameter always set to 1) */
+  CF_p **grid;        /* grid[k]: the grid_deg[k] + 1 values of y_{k+1} */
+  slong ngridpoints;  /* number of grid points */
+  slong gridpoint;    /* row-major index of the current grid point */
+  slong ray_pos;      /* index of the next point on the current ray */
+  int new_grid_point; /* 1: move to the next direction first */
+  CF_p *ts;           /* scaling factors drawn so far */
+  slong nts;
+  slong ts_alloc;
+  nmod_t mod;
+} point_tracker_struct;
+typedef point_tracker_struct point_tracker_t[1];
+
+void point_tracker_init(point_tracker_t P, nvars_t nparams,
+                        const deg_t *grid_deg, nmod_t mod,
+                        flint_rand_t state);
+
+void point_tracker_clear(point_tracker_t P);
+
+/* In:  P; if P->new_grid_point = 1, the point is the first one on the next
+ *      grid point (and new_grid_point is reset to 0).
+ * Out: z (nparams entries) = t * (y_1, ..., y_{r-1}, 1), y the current
+ *      grid point, t = ts[k] for the k-th point on it; t is drawn when first
+ *      needed (random, nonzero, distinct from the previous ones). Returns 0,
+ *      or 1 if there is no next grid point (z, t and P unchanged).
+ * Assumes: nparams >= 1; fewer than p - 1 values per grid variable and
+ *      scaling factors. */
+int point_tracker_next(CF_p *z, CF_p *t, point_tracker_t P,
+                       flint_rand_t state);
+
 
 #endif

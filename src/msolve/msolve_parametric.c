@@ -435,3 +435,113 @@ int ratfunc_search_get(nmod_poly_t num, nmod_poly_t den,
   nmod_poly_set(den, S->den);
   return S->cand_pole_at_0;
 }
+
+/* Specialization points */
+
+/* random value in [1, p-1] different from vals[0], ..., vals[n-1] */
+static CF_p draw_new_nonzero(const CF_p *vals, slong n, nmod_t mod,
+                             flint_rand_t state) {
+  for (;;) {
+    CF_p v = 1 + n_randint(state, mod.n - 1);
+    slong i = 0;
+    while (i < n && vals[i] != v) {
+      i++;
+    }
+    if (i == n) {
+      return v;
+    }
+  }
+}
+
+void point_tracker_init(point_tracker_t P, nvars_t nparams,
+                        const deg_t *grid_deg, nmod_t mod,
+                        flint_rand_t state) {
+
+  const nvars_t ngrid = nparams - 1;
+  P->nparams = nparams;
+  P->mod = mod;
+
+  /* malloc(0) may return NULL, which is not an error */
+  P->grid_deg = malloc(ngrid * sizeof(deg_t));
+  P->grid = malloc(ngrid * sizeof(CF_p *));
+  if (ngrid > 0 && (P->grid_deg == NULL || P->grid == NULL)) {
+    fprintf(stderr, "Error when allocating for specialization points.\n");
+    exit(1);
+  }
+  P->ngridpoints = 1;
+  for (nvars_t k = 0; k < ngrid; k++) {
+    P->grid_deg[k] = grid_deg[k];
+    P->grid[k] = malloc((grid_deg[k] + 1) * sizeof(CF_p));
+    if (P->grid[k] == NULL) {
+      fprintf(stderr, "Error when allocating for specialization points.\n");
+      exit(1);
+    }
+    /* distinct values, as needed for the interpolation on the grid */
+    for (deg_t i = 0; i <= grid_deg[k]; i++) {
+      P->grid[k][i] = draw_new_nonzero(P->grid[k], i, mod, state);
+    }
+    P->ngridpoints *= grid_deg[k] + 1;
+  }
+
+  P->gridpoint = 0;
+  P->ray_pos = 0;
+  P->new_grid_point = 0;
+  P->ts = NULL;
+  P->nts = 0;
+  P->ts_alloc = 0;
+  return;
+}
+
+void point_tracker_clear(point_tracker_t P) {
+
+  for (nvars_t k = 0; k < P->nparams - 1; k++) {
+    free(P->grid[k]);
+  }
+  free(P->grid);
+  free(P->grid_deg);
+  free(P->ts);
+  return;
+}
+
+int point_tracker_next(CF_p *z, CF_p *t, point_tracker_t P,
+                       flint_rand_t state) {
+
+  if (P->new_grid_point) {
+    if (P->gridpoint + 1 == P->ngridpoints) {
+      return 1;
+    }
+    P->gridpoint++;
+    P->ray_pos = 0;
+    P->new_grid_point = 0;
+  }
+
+  /* the ray_pos-th scaling factor, drawn if this is the first grid point
+   * that needs it */
+  if (P->ray_pos == P->nts) {
+    if (P->nts == P->ts_alloc) {
+      P->ts_alloc = P->ts_alloc == 0 ? 16 : 2 * P->ts_alloc;
+      CF_p *tmp = realloc(P->ts, P->ts_alloc * sizeof(CF_p));
+      if (tmp == NULL) {
+        fprintf(stderr, "Error when allocating for specialization points.\n");
+        exit(1);
+      }
+      P->ts = tmp;
+    }
+    P->ts[P->nts] = draw_new_nonzero(P->ts, P->nts, P->mod, state);
+    P->nts++;
+  }
+  *t = P->ts[P->ray_pos];
+  P->ray_pos++;
+
+  /* z = t * (y_1, y_2, ..., y_{r - 1}, 1); the indices of y_1, ..., y_{r-1} are
+   * the digits of gridpoint in the mixed radix (grid_deg[k] + 1), the last
+   * one varying fastest */
+  z[P->nparams - 1] = *t;
+  slong rem = P->gridpoint;
+  for (nvars_t k = P->nparams - 2; k >= 0; k--) {
+    slong len = P->grid_deg[k] + 1;
+    z[k] = nmod_mul(*t, P->grid[k][rem % len], P->mod);
+    rem /= len;
+  }
+  return 0;
+}
