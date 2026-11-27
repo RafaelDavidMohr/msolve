@@ -779,10 +779,6 @@ int main(int argc, char **argv){
       exit(1);
     }
 
-    if (param_block_len) {
-      fprintf(ERRSTREAM, "Work in process.\n");
-      exit(1);
-    }
 #ifdef IODEBUG
     display_gens(VERBSTREAM, gens);
 #endif
