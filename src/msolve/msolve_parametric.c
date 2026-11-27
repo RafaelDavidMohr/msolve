@@ -181,7 +181,7 @@ rational_interpolant_get_ratfunc(const rational_interpolant_t interp,
   return;
 }
 
-/* Main functions */
+/* Multivariate interpolation */
 
 void compute_newton_interpolant(const CF_p *vals, CF_p *const *grid, const deg_t *degrees,
 				int32_t nvars,
@@ -280,22 +280,26 @@ void univariate_interp_data_clear(univariate_interp_data_t data) {
   return;
 }
 
-int interpolate_univariate_ratfunc(const univariate_interp_data_t data,
-				   const CF_p *vals,
-				   nmod_poly_t num, nmod_poly_t denom) {
+/* Rational function reconstruction from an interpolating polynomial, by
+ * hgcd on (master, F). Used by interpolate_univariate_ratfunc_from_data
+ * and by the search (ratfunc_search_add_point).
+ *
+ * master = prod (t - t_i) over N = 2d + 1 distinct arguments (N odd), and
+ * F is the polynomial of degree < N interpolating the values at the t_i;
+ * F must be normalized (as all nmod_poly functions keep it). hgcd stops at
+ * the first remainder of degree <= d, so the result num / denom always
+ * has deg num <= d and deg denom <= d. If the values come from f = P / D
+ * with deg P, deg D <= d and D(t_i) != 0, then num / denom = f in lowest
+ * terms. Return value and normalization as for
+ * interpolate_univariate_ratfunc_from_data (0: denom(0) = 1; 1: denom(0)
+ * = 0, num and denom not normalized). num and denom must be two different
+ * polynomials, different from F and master, initialized with the modulus
+ * of F; their previous content is overwritten. */
+static int interpolate_univariate_ratfunc(const nmod_poly_t F,
+                                          const nmod_poly_t master,
+                                          nmod_poly_t num, nmod_poly_t denom) {
 
-  nmod_t mod = data->master->mod;
-  slong len = data->len;
-
-  /* interpolating polynomial, written directly into the coefficients of F */
-  nmod_poly_t F;
-  nmod_poly_init_mod(F, mod);
-  nmod_poly_fit_length(F, len);
-  _nmod_poly_interpolate_nmod_vec_fast_precomp(F->coeffs, vals, data->tree,
-                                               data->weights, len, mod);
-  _nmod_poly_set_length(F, len);
-  _nmod_poly_normalise(F); /* hgcd needs normalized input */
-
+  nmod_t mod = F->mod;
   /* outputs of hgcd that we use: denom is m11, num is B;
    * m12, m21, m22 and A are only workspace */
   nmod_poly_t m12, m21, m22, A;
@@ -305,9 +309,8 @@ int interpolate_univariate_ratfunc(const univariate_interp_data_t data,
   nmod_poly_init_mod(A, mod);
 
   slong sgn;
-  sgn = nmod_poly_hgcd(denom, m12, m21, m22, A, num, data->master, F);
+  sgn = nmod_poly_hgcd(denom, m12, m21, m22, A, num, master, F);
 
-  nmod_poly_clear(F);
   nmod_poly_clear(m12);
   nmod_poly_clear(m21);
   nmod_poly_clear(m22);
@@ -327,20 +330,140 @@ int interpolate_univariate_ratfunc(const univariate_interp_data_t data,
   return 0;
 }
 
-int compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals,
-					 const deg_t deg,
-					 nmod_poly_t num, nmod_poly_t denom,
-					 CF_p chr) {
+int interpolate_univariate_ratfunc_from_data(const univariate_interp_data_t data,
+					     const CF_p *vals,
+					     nmod_poly_t num, nmod_poly_t denom) {
 
-  nmod_t mod;
-  nmod_init(&mod, chr);
+  nmod_t mod = data->master->mod;
+  slong len = data->len;
 
-  univariate_interp_data_t data;
-  univariate_interp_data_init(data, args, 2 * (slong) deg + 1, mod);
-  int ret = interpolate_univariate_ratfunc(data, vals, num, denom);
-  univariate_interp_data_clear(data);
+  /* interpolating polynomial, written directly into the coefficients of F */
+  nmod_poly_t F;
+  nmod_poly_init_mod(F, mod);
+  nmod_poly_fit_length(F, len);
+  _nmod_poly_interpolate_nmod_vec_fast_precomp(F->coeffs, vals, data->tree,
+                                               data->weights, len, mod);
+  _nmod_poly_set_length(F, len);
+  _nmod_poly_normalise(F); /* hgcd needs normalized input */
 
-  return ret;
+  int retcode = interpolate_univariate_ratfunc(F, data->master, num, denom);
+  nmod_poly_clear(F);
+  return retcode;
 }
 
+/* Search for a univariate rational function of unknown degree */
 
+void ratfunc_search_init(ratfunc_search_t S, len_t ncoeffs, nmod_t mod,
+                         flint_rand_t state) {
+
+  S->ncoeffs = ncoeffs;
+
+  S->lambda = malloc(ncoeffs * sizeof(CF_p));
+  if (S->lambda == NULL) {
+    fprintf(stderr, "Error when allocating for rational function search.\n");
+    exit(1);
+  }
+  /* nonzero, so that every c_j enters the combination */
+  for (len_t j = 0; j < ncoeffs; j++) {
+    S->lambda[j] = 1 + n_randint(state, mod.n - 1);
+  }
+
+  nmod_poly_init_mod(S->F, mod);      /* F = 0: interpolates no points */
+  nmod_poly_init_mod(S->master, mod);
+  nmod_poly_one(S->master);           /* empty product */
+  nmod_poly_init_mod(S->num, mod);
+  nmod_poly_init_mod(S->den, mod);
+
+  S->have_cand = 0;
+  S->cand_pole_at_0 = 0;
+  S->npts = 0;
+  S->ncand = 0;
+  return;
+}
+
+void ratfunc_search_clear(ratfunc_search_t S) {
+
+  free(S->lambda);
+  nmod_poly_clear(S->F);
+  nmod_poly_clear(S->master);
+  nmod_poly_clear(S->num);
+  nmod_poly_clear(S->den);
+  return;
+}
+
+int ratfunc_search_add_point(ratfunc_search_t S, CF_p t, const CF_p *vals) {
+
+  nmod_t mod = S->F->mod;
+
+  /* master(t) = prod (t - t_i) vanishes iff t is one of the t_i. Checked
+   * first, so that S is not modified in that case. */
+  CF_p master_at_t = nmod_poly_evaluate_nmod(S->master, t);
+  if (master_at_t == 0) {
+    return -1;
+  }
+
+  /* v = f(t), the value of the combination */
+  CF_p v = 0;
+  for (len_t j = 0; j < S->ncoeffs; j++) {
+    v = nmod_add(v, nmod_mul(S->lambda[j], vals[j], mod), mod);
+  }
+
+  /* Test the candidate: it agrees with the point iff num(t) = v * den(t)
+   * and den(t) != 0. Comparing num(t) with v * den(t) avoids an
+   * inversion; den(t) = 0 means a pole of the candidate at t, but f(t) = v
+   * is finite, so the candidate is wrong. */
+  if (S->have_cand) {
+    CF_p num_at_t = nmod_poly_evaluate_nmod(S->num, t);
+    CF_p den_at_t = nmod_poly_evaluate_nmod(S->den, t);
+    if (den_at_t == 0 || num_at_t != nmod_mul(v, den_at_t, mod)) {
+      S->have_cand = 0;
+    }
+  }
+
+  /* Newton step, also when the candidate agreed (if it fails later, the
+   * next candidate needs all points):
+   *   F <- F + (v - F(t)) / master(t) * master.
+   * master vanishes at the old t_i, so the new F still takes the old
+   * values there, and at t it takes the value v. */
+  CF_p c = nmod_sub(v, nmod_poly_evaluate_nmod(S->F, t), mod);
+  c = nmod_div(c, master_at_t, mod);
+  nmod_poly_scalar_addmul_nmod(S->F, S->master, c);
+
+  /* master <- (x - t) * master = x * master - t * master */
+  nmod_poly_t tmp;
+  nmod_poly_init_mod(tmp, mod);
+  nmod_poly_shift_left(tmp, S->master, 1);
+  nmod_poly_scalar_addmul_nmod(tmp, S->master, nmod_neg(t, mod));
+  nmod_poly_swap(S->master, tmp);
+  nmod_poly_clear(tmp);
+
+  S->npts++;
+
+  if (S->have_cand) {
+    /* every point since the candidate was computed has agreed with it */
+    return S->npts - S->ncand >= N_STABLE_POINTS_TO_STOP;
+  }
+
+  /* No candidate: compute one, but only for an odd number of points
+   * N = 2d + 1, where hgcd gives numerator and denominator of degree <= d
+   * (see interpolate_univariate_ratfunc). For even N, wait for the next
+   * point. */
+  if (S->npts % 2 == 1) {
+    S->cand_pole_at_0 =
+        interpolate_univariate_ratfunc(S->F, S->master, S->num, S->den);
+    S->have_cand = 1;
+    S->ncand = S->npts;
+  }
+  return 0;
+}
+
+int ratfunc_search_get(nmod_poly_t num, nmod_poly_t den,
+                       const ratfunc_search_t S) {
+
+  if (!S->have_cand) {
+    return -1;
+  }
+  nmod_poly_set(num, S->num);
+  nmod_poly_set(den, S->den);
+  return S->cand_pole_at_0;
+}

@@ -30,10 +30,17 @@
 #include <flint/nmod_vec.h>
 #include <flint/nmod_poly.h>
 #include <flint/nmod_mpoly.h>
+#include <flint/ulong_extras.h>
 #include "./msolve-data.h"
 #include "../neogb/data.h"
 
 typedef ulong CF_p; // for flint compatibility
+
+/* black box for rational function reconstruction
+   Writes values of length of coeffs rational functions
+   evaluated at z into coeffs. Return 0 on success, nonzero
+   if z is a bad point */
+typedef int (*evaluation_oracle_fn)(CF_p *coeffs, const CF_p *z, void *data);
 
 /* univariate polynomial in t whose coefficients are rational functions
  * in Fp(z_1, ..., z_r), each with its own numerator and denominator (no
@@ -144,9 +151,9 @@ compute_newton_interpolant(const CF_p *vals, CF_p *const *grid,
 
 /* Initializes data for the len arguments ts[0], ..., ts[len-1] modulo the
  * prime p = mod.n. The arguments must be reduced mod p and pairwise distinct,
- * and len >= 1; for interpolate_univariate_ratfunc, len must be odd. The
- * preconditions are not checked. ts is not modified and is no longer
- * needed after the call. Free data with univariate_interp_data_clear. */
+ * and len >= 1; for interpolate_univariate_ratfunc_from_data, len must be
+ * odd. The preconditions are not checked. ts is not modified and is no
+ * longer needed after the call. Free data with univariate_interp_data_clear. */
 void univariate_interp_data_init(univariate_interp_data_t data,
                                  const CF_p *ts, slong len, nmod_t mod);
 
@@ -185,45 +192,102 @@ void univariate_interp_data_clear(univariate_interp_data_t data);
  *
  * The preconditions are not checked. If the values do not come from such
  * an f, the result is unspecified, and FLINT may abort. */
-int interpolate_univariate_ratfunc(const univariate_interp_data_t data,
-				   const CF_p *vals,
-				   nmod_poly_t num, nmod_poly_t denom);
+int interpolate_univariate_ratfunc_from_data(const univariate_interp_data_t data,
+					     const CF_p *vals,
+					     nmod_poly_t num, nmod_poly_t denom);
 
-/* Univariate rational function interpolation with a known degree bound,
- * without precomputation: builds the data for the arguments args, calls
- * interpolate_univariate_ratfunc and frees the data again. When several
- * reconstructions use the same arguments, call univariate_interp_data_init
- * once and interpolate_univariate_ratfunc for each of them instead.
+/* Number of consecutive new points that must agree with a candidate before
+ * the search below stops (zeta in the notes). Each agreement of a wrong
+ * candidate has probability about deg / p, so this should be at least 2,
+ * and possibly more for small primes. Can be overridden at compile time,
+ * e.g. with -DN_STABLE_POINTS_TO_STOP=3. */
+#ifndef N_STABLE_POINTS_TO_STOP
+#define N_STABLE_POINTS_TO_STOP 2
+#endif
+
+/* State of the search for a univariate rational function of unknown
+ * degree (step 1 of the parametric algorithm).
  *
- * Let p = chr and N = 2 * deg + 1. Suppose vals[i] = f(args[i]) for a
- * rational function f = P / D over Z/pZ with deg P <= deg and
- * deg D <= deg. Then this computes f = num / denom in lowest terms. The
- * return value and the normalization are as for
- * interpolate_univariate_ratfunc:
- *   - 0 if D(0) != 0: denom(0) = 1, i.e. num = p and denom = 1 + q in the
- *     form p / (1 + q). If f = 0, the result is num = 0, denom = 1.
- *   - 1 if D(0) = 0: num / denom = f, but num and denom are not
- *     normalized (only determined up to a common nonzero constant).
+ * Points arrive one at a time. A point is an argument t_i together with
+ * the values c_0(t_i), ..., c_{C-1}(t_i) of C rational functions
+ * (C = ncoeffs). The search only looks at the random linear combination
+ *   f = lambda[0] c_0 + ... + lambda[C-1] c_{C-1}
+ * and stops once a candidate for f has agreed with
+ * N_STABLE_POINTS_TO_STOP new points.
  *
- * args   the N arguments, reduced mod p and pairwise distinct (so N <= p).
- * vals   the N values f(args[i]), reduced mod p. D must not vanish at the
- *        arguments.
- * deg    a bound on the degrees of both P and D, deg >= 0. It need not be
- *        tight.
- * num    output, the numerator.
- * denom  output, the denominator; denom(0) = 1 if 0 is returned.
- * chr    the prime p.
+ * How candidates are computed: when there is no candidate and the number
+ * of points is odd, N = 2d + 1, hgcd on (master, F) gives a candidate
+ * num / den with deg num <= d and deg den <= d. It is kept as long as it
+ * agrees with every new point, and dropped at the first point where it
+ * does not; the next candidate is then computed at the next odd number of
+ * points. If max(deg P, deg D) = d for f = P / D in lowest terms, the
+ * candidate computed at 2d + 1 points is f, so the search stops after
+ * 2d + 1 + N_STABLE_POINTS_TO_STOP points, unless a wrong candidate
+ * agreed with a point by chance (probability about d / p per point).
  *
- * Initialization: num and denom must be two different polynomials, already
- * initialized by the caller with modulus chr (e.g. nmod_poly_init(num,
- * chr)); FLINT uses the modulus stored in them. Their previous content is
- * overwritten, and the caller clears them afterwards. args and vals are
- * not modified.
+ * The values of the c_j themselves are not stored: the caller keeps them
+ * for the per-coefficient reconstruction. Once the search has stopped,
+ * the first ncand points are the ones the candidate was computed from
+ * (ncand is odd), and the last npts - ncand = N_STABLE_POINTS_TO_STOP
+ * points are the ones that confirmed it. */
+typedef struct {
+  len_t ncoeffs;        /* C, number of values per point */
+  CF_p *lambda;         /* the C coefficients of the combination, nonzero */
+  nmod_poly_t F;        /* polynomial interpolating f at all points so far,
+                         * deg F < npts; also holds the modulus */
+  nmod_poly_t master;   /* prod (t - t_i) over all points so far */
+  nmod_poly_t num, den; /* current candidate num / den, if have_cand */
+  int have_cand;        /* 1 if there is a current candidate, 0 if not */
+  int cand_pole_at_0;   /* 1 if den(0) = 0 (num, den not normalized), 0 if
+                         * den(0) = 1; only meaningful if have_cand */
+  slong npts;           /* number of points added so far */
+  slong ncand;          /* number of points the current candidate was
+                         * computed from; only meaningful if have_cand.
+                         * Every point added after these agreed with the
+                         * candidate, otherwise it would have been dropped,
+                         * so npts - ncand points have confirmed it. */
+} ratfunc_search_struct;
+typedef ratfunc_search_struct ratfunc_search_t[1];
+
+/* Initializes S for a search over Z/pZ, p = mod.n prime, with
+ * ncoeffs >= 1 values per point. The coefficients lambda[0], ..., lambda[ncoeffs-1] of the
+ * combination are drawn uniformly at random in [1, p-1] from state.
+ * Free S with ratfunc_search_clear (also allowed directly after init). */
+void ratfunc_search_init(ratfunc_search_t S, len_t ncoeffs, nmod_t mod,
+                         flint_rand_t state);
+
+/* Frees the memory used by S. */
+void ratfunc_search_clear(ratfunc_search_t S);
+
+/* Adds a point: the argument t and the ncoeffs values
+ * vals[j] = c_j(t), all reduced mod p. The denominators of the c_j must
+ * not vanish at t (a caller working with an oracle skips such points).
+ * vals is not modified and can be reused after the call.
  *
- * The preconditions are not checked. If the values do not come from such
- * an f, the result is unspecified, and FLINT may abort. */
-int compute_univariate_ratfunc_known_deg(const CF_p *args, const CF_p *vals, const deg_t deg,
-					 nmod_poly_t num, nmod_poly_t denom,
-					 CF_p chr);
+ * Returns
+ *    1  if the search has stopped: the current candidate was computed
+ *       before this point, and at least N_STABLE_POINTS_TO_STOP points
+ *       (this one included) have agreed with it since;
+ *    0  if more points are needed;
+ *   -1  if t was added before. Then the point is ignored and S is not
+ *       modified.
+ * Points can still be added after 1 has been returned; the return value
+ * stays 1 as long as they agree with the candidate. */
+int ratfunc_search_add_point(ratfunc_search_t S, CF_p t, const CF_p *vals);
+
+/* Copies the current candidate for f into num / den. num and den must be
+ * two different polynomials, initialized with modulus p; their previous
+ * content is overwritten. Returns
+ *    0  if den(0) != 0; then den(0) = 1 (normalized as in
+ *       interpolate_univariate_ratfunc_from_data);
+ *    1  if den(0) = 0; then num / den is the candidate, but num and den
+ *       are only determined up to a common nonzero constant;
+ *   -1  if there is no current candidate; then num and den are not
+ *       modified.
+ * This is meant to be called once add_point has returned 1, but it can be
+ * called at any time. */
+int ratfunc_search_get(nmod_poly_t num, nmod_poly_t den,
+                       const ratfunc_search_t S);
+
 
 #endif
