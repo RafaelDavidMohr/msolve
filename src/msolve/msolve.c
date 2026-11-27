@@ -2816,6 +2816,7 @@ int msolve_trace_qq(mpz_param_t *mpz_paramp,
                     int32_t nr_threads,
                     int32_t max_nr_pairs,
                     int32_t elim_block_len,
+                    int32_t param_block_len,
                     int32_t reset_ht,
                     int32_t la_option,
                     int32_t use_signatures,
@@ -2827,6 +2828,15 @@ int msolve_trace_qq(mpz_param_t *mpz_paramp,
                     int32_t pbm_file,
                     files_gb *files,
                     int round){
+
+  if (param_block_len > 0) {
+    fprintf(ERRSTREAM, "Rational parametrizations of systems with "
+                       "parameters are not implemented yet.\n");
+    return -1;
+  }
+  /* QQ (specializations modulo primes) or Fp(z) (specializations at
+   * points z): F4 and FGLM are learned once, then their traces applied */
+  const int is_traceable_field = gens->field_char == 0 || param_block_len > 0;
 
   const double rtstart = realtime();
   const int32_t *lens = gens->lens;
@@ -3039,7 +3049,7 @@ int msolve_trace_qq(mpz_param_t *mpz_paramp,
           lineqs_ptr, bsquvars, squvars, lmb_ori, field_char);
       return 4;
   }
-  if (gens->field_char == 0 && gens->rand_linear) {
+  if (is_traceable_field && gens->rand_linear) {
     *minpolydeg_ptr = (*nmod_params)->degsqfrelimpol;
     free_msolve_trace_qq_initial_data(invalid_gens, st, lp, bs_qq, bs, nmod_params,
         bad_primes, bmatrix, bdiv_xn, blen_gb_xn, bstart_cf_gb_xn, bextra_nf,
@@ -3070,7 +3080,7 @@ int msolve_trace_qq(mpz_param_t *mpz_paramp,
   (*mpz_paramp)->dim = *dim_ptr;
   (*mpz_paramp)->dquot = *dquot_ptr;
 
-  if (lmb_ori == NULL || success == 0 || print_gb || gens->field_char) {
+  if (lmb_ori == NULL || success == 0 || print_gb || !is_traceable_field) {
     if (print_gb) {
       free_msolve_trace_qq_initial_data(invalid_gens, st, lp, bs_qq, bs, nmod_params,
           bad_primes, bmatrix, bdiv_xn, blen_gb_xn, bstart_cf_gb_xn, bextra_nf,
@@ -3079,7 +3089,7 @@ int msolve_trace_qq(mpz_param_t *mpz_paramp,
           lineqs_ptr, bsquvars, squvars, lmb_ori, field_char);
       return 0;
     }
-    if (*dim_ptr == 0 && gens->field_char && success) {
+    if (*dim_ptr == 0 && !is_traceable_field && success) {
       /* copy of parametrization */
       if (*dquot_ptr != 0) {
         param_t *par = allocate_fglm_param(gens->field_char, st->nvars);
@@ -4870,6 +4880,7 @@ int real_msolve_qq(mpz_param_t *mpz_paramp, param_t **nmod_param, int *dim_ptr,
                    int32_t nr_threads,
                    int32_t max_nr_pairs,
                    int32_t elim_block_len,
+                   int32_t param_block_len,
                    int32_t reset_ht,
                    int32_t la_option,
                    int32_t use_signatures,
@@ -4914,6 +4925,7 @@ int real_msolve_qq(mpz_param_t *mpz_paramp, param_t **nmod_param, int *dim_ptr,
                           nr_threads,
                           max_nr_pairs,
                           elim_block_len,
+                          param_block_len,
                           reset_ht,
                           la_option,
                           use_signatures,
@@ -5144,20 +5156,33 @@ restart:
     b     = 0;
 
     if (param_block_len) {
-      fprintf(ERRSTREAM, "Warning: Called with nonzero amount of parameters, "
-                         "rat. parametrization will be computed and all other "
-                         "output options ignored.\n");
+      /* only the rational parametrization is available, computed by
+       * msolve_trace_qq; the other branches below would treat the
+       * parameters as variables */
+      const char *unsupported = NULL;
       if (gens->field_char == 0) {
-        fprintf(
-            ERRSTREAM,
-            "Parametric systems available only in positive characteristic.\n");
+        unsupported = "Parametric systems available only in positive "
+                      "characteristic.";
+      } else if (gens->field_char > INT32_MAX
+                 || is_gf2_ext(gens->field_char) || gens->boolean) {
+        unsupported = "Parametric systems not available for characteristics "
+                      ">= 2^31, GF(2^k) or Boolean systems.";
+      } else if (get_param == 0 || print_gb != 0 || elim_block_len > 0
+                 || use_signatures > 0 || saturate == 1 || colon == 1
+                 || normal_form != 0) {
+        /* with -e, the branch of the parametrization prints a GB */
+        unsupported = "Parametric systems: only rational parametrizations "
+                      "are available, use -P 2 and none of the options "
+                      "-g, -e, -q, -S, -C, -n.";
+      }
+      if (unsupported != NULL) {
+        fprintf(ERRSTREAM, "%s\n", unsupported);
         free(bld);
         free(blen);
         free(bexp);
         free(bcf);
         return -1;
       }
-      return -1;
     }
 
     if(gens->field_char > INT32_MAX || is_gf2_ext(gens->field_char) || gens->boolean){
@@ -5773,7 +5798,7 @@ restart:
                        real_pts_ptr,
                        gens,
                        initial_hts, unstable_staircase, nr_threads, max_pairs,
-                       elim_block_len, update_ht,
+                       elim_block_len, param_block_len, update_ht,
                        la_option, use_signatures, lift_matrix,
                        &init_primes, info_level, print_gb,
                        generate_pbm, precision, files, round, get_param);
@@ -6492,7 +6517,7 @@ restart:
                     real_pts_ptr,
                     gens,
 		            initial_hts, unstable_staircase, nr_threads, max_pairs,
-                    elim_block_len, update_ht,
+                    elim_block_len, param_block_len, update_ht,
                     la_option, use_signatures, lift_matrix,
                     &init_primes, info_level, print_gb,
                     generate_pbm, precision, files, round, get_param);
